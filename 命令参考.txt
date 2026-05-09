@@ -1,0 +1,130 @@
+==========================================
+  数据集初筛工具 - 命令参考
+==========================================
+
+一、首次安装
+------------------------------------------
+# 1.1 安装后端依赖
+cd backend
+pip install -r requirements.txt
+
+# 1.2 安装前端依赖
+cd frontend
+npm install
+
+
+二、启动服务
+------------------------------------------
+# 2.1 启动后端 (二选一)
+cd backend
+# 方式A: 直接启动 (每次都要重开)
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 方式B: 使用镜像加速 (国内推荐，先设置再启动)
+set HF_ENDPOINT=https://hf-mirror.com
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 2.2 启动前端 (另开一个终端)
+cd frontend
+npx vite --host
+
+# 2.3 访问地址
+# 前端: http://localhost:5173
+# 后端API文档: http://localhost:8000/docs
+
+
+三、设置 HuggingFace 镜像 (国内必须)
+------------------------------------------
+# Windows PowerShell / CMD:
+set HF_ENDPOINT=https://hf-mirror.com
+
+# Git Bash:
+export HF_ENDPOINT=https://hf-mirror.com
+
+# 永久生效 (Windows):
+# 在"系统环境变量"中添加 HF_ENDPOINT=https://hf-mirror.com
+
+
+四、前端构建 (部署用)
+------------------------------------------
+cd frontend
+npx vite build
+# 产物在 frontend/dist/ 目录，可用 nginx 等直接托管
+
+
+五、场景筛选使用流程
+------------------------------------------
+1. 准备图片文件夹，如 D:/fire-images/
+2. 启动前后端
+3. 浏览器打开 http://localhost:5173
+4. 在"场景筛选"页填写:
+   - 图片目录路径: D:/fire-images/
+   - 场景描述: aerial view of forest fire from drone (英文效果更好)
+   - 返回数量: 50 (取前50张最匹配的)
+   - 最低相似度阈值: 留空或填 0.2 (低于此分数的不要)
+5. 点"开始筛选"
+6. 筛选完成后在右侧预览结果
+7. 填写导出目录 (如 D:/filtered/) 点"导出结果"
+
+
+六、去重采样使用流程
+------------------------------------------
+1. 准备图片文件夹，如 D:/video-frames/
+2. 在"去重采样"页填写:
+   - 图片目录路径: D:/video-frames/
+   - 目标采样数量: 50 (最终保留多少张)
+   - 汉明距离阈值: 8 (默认，越小保留越多相似帧)
+3. 点"开始去重采样"
+4. 查看流水线统计: 原始数量 -> 去重后 -> 采样后
+5. 填写导出目录点"导出结果"
+
+
+七、参数说明
+------------------------------------------
+场景筛选:
+  - 返回数量 (Top-K): 返回匹配度最高的前K张，默认50
+  - 最低相似度阈值: 0.0~1.0，低于此分数的直接丢弃，留空=不过滤
+  - 场景描述建议: 用英文+具体描述。例如:
+    "a photo of forest fire from drone view"
+    "aerial photography of wildfire in mountains"
+    "nighttime urban building fire close-up"
+
+去重采样:
+  - 目标采样数量: 最终保留的图片数量
+  - 汉明距离阈值: 1~64，越小越相似（去重越严格），默认8
+
+
+八、调试命令
+------------------------------------------
+# 检查 open_clip 版本和返回值
+python -c "import open_clip; result = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k'); print([type(r).__name__ for r in result])"
+
+# 检查 PyTorch 是否识别 GPU
+python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device count:', torch.cuda.device_count())"
+
+# 测试单张图片的场景匹配
+python -c "from app.scene_filter import filter_by_scene; r = filter_by_scene('D:/test', 'forest fire', top_k=5); print(r)"
+
+
+九、常见问题
+------------------------------------------
+Q: 启动报 "No module named 'xxx'"
+A: pip install xxx 或重新 pip install -r requirements.txt
+
+Q: 模型下载很慢
+A: 设置 HF_ENDPOINT=https://hf-mirror.com 后重启后端
+
+Q: uvicorn 命令找不到 (Windows)
+A: 用 python -m uvicorn 代替 uvicorn
+
+Q: 图片预览显示问号/不显示
+A: 确认图片路径没有中文特殊字符；确认图片格式为 jpg/png/bmp/webp
+
+Q: 匹配度分数都很低 (20~30%)
+A: 尝试用更具体的英文描述，或换不同措辞测试。
+
+Q: 内存不足
+A: 减少目标采样数量，或分批次处理(每次5000张以内)
+
+Q: 想用 GPU 加速
+A: 安装 CUDA 版 PyTorch: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
