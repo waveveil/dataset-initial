@@ -4,6 +4,8 @@ export default function DedupSample() {
   const [imageDir, setImageDir] = useState('')
   const [targetCount, setTargetCount] = useState(50)
   const [phashThreshold, setPhashThreshold] = useState(8)
+  const [labelDirs, setLabelDirs] = useState('')
+  const [fastMode, setFastMode] = useState(false)
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState(null)
@@ -32,6 +34,8 @@ export default function DedupSample() {
       }
       formData.append('target_count', targetCount)
       formData.append('phash_threshold', phashThreshold)
+      formData.append('fast_mode', fastMode)
+      if (labelDirs) formData.append('label_dirs', labelDirs)
 
       const res = await fetch('/api/dedup/sample', { method: 'POST', body: formData })
       const data = await res.json()
@@ -51,6 +55,7 @@ export default function DedupSample() {
   const reduction = summary
     ? `${summary.total_input} → ${summary.after_dedup} → ${summary.after_sample}`
     : ''
+  const totalLabels = results?.results?.reduce((sum, r) => sum + (r.labels?.length || 0), 0) || 0
 
   const handleExport = async () => {
     if (!results?.results?.length) return
@@ -63,10 +68,15 @@ export default function DedupSample() {
         body: JSON.stringify({
           file_paths: results.results.map((r) => r.path),
           output_dir: outputDir,
+          label_dirs: labelDirs ? labelDirs.split(',').map(d => d.trim()).filter(Boolean) : null,
         }),
       })
       const data = await res.json()
-      setExportMsg(`已导出 ${data.exported} 个文件至 ${data.output_dir}`)
+      if (data.label_exported) {
+        setExportMsg(`已导出 ${data.exported} 张图片、${data.label_exported} 个标签文件至 ${data.output_dir}`)
+      } else {
+        setExportMsg(`已导出 ${data.exported} 个文件至 ${data.output_dir}`)
+      }
     } catch {
       setExportMsg('导出失败，请确认后端服务已启动')
     } finally {
@@ -108,6 +118,29 @@ export default function DedupSample() {
               />
             </label>
           </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1.5">
+              标签目录（可选，多个用逗号分隔）
+            </label>
+            <input
+              type="text"
+              value={labelDirs}
+              onChange={(e) => setLabelDirs(e.target.value)}
+              placeholder="如: D:/labels/YOLO/, D:/labels/VOC/"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={fastMode}
+              onChange={(e) => setFastMode(e.target.checked)}
+              className="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500"
+            />
+            快速模式（仅 pHash 去重，跳过特征聚类，约 2-3 分钟）
+          </label>
 
           <div className="flex gap-4">
             <div className="flex-1">
@@ -157,6 +190,9 @@ export default function DedupSample() {
             {results && (
               <span className="ml-2 text-sm font-normal text-gray-400">
                 共 {results.total} 张
+                {totalLabels > 0 && (
+                  <span className="ml-1 text-green-400">+ {totalLabels} 标签</span>
+                )}
               </span>
             )}
           </h2>

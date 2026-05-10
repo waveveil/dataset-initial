@@ -8,6 +8,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.cluster import MiniBatchKMeans
 from torchvision import models, transforms
+from torch.utils.data import Dataset, DataLoader
 
 from .config import BATCH_SIZE, DEVICE, OUTPUT_DIR
 
@@ -33,6 +34,22 @@ def _get_feature_model():
     return _feature_model, _feature_transform
 
 
+class ImagePathDataset(Dataset):
+    def __init__(self, image_paths: list[str], transform):
+        self.paths = image_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx):
+        try:
+            img = Image.open(self.paths[idx]).convert("RGB")
+            return self.transform(img), idx, True
+        except Exception:
+            return torch.zeros(3, 224, 224), idx, False
+
+
 def compute_phash(img_path: str):
     try:
         img = Image.open(img_path).convert("L")
@@ -50,7 +67,6 @@ def hamming_distance(h1, h2) -> int:
 
 
 def phash_dedup(image_paths: list[str], threshold: int = 8) -> list[str]:
-    # parallel pHash computation — big win for 10k+ images
     hashes = [None] * len(image_paths)
     workers = min(16, len(image_paths))
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -74,33 +90,51 @@ def phash_dedup(image_paths: list[str], threshold: int = 8) -> list[str]:
 
 @torch.no_grad()
 def _extract_features_to_memmap(image_paths: list[str], mmap_path: str) -> np.memmap:
-    """Extract features and write directly to a memory-mapped file. RAM constant regardless of dataset size."""
     model, transform = _get_feature_model()
     n = len(image_paths)
     mmap = np.memmap(mmap_path, dtype=np.float32, mode='w+', shape=(n, 2048))
 
-    for i in range(0, n, BATCH_SIZE):
-        batch_paths = image_paths[i: i + BATCH_SIZE]
-        tensors = []
-        valid_indices = []
-        for j, p in enumerate(batch_paths):
-            try:
-                img = Image.open(p).convert("RGB")
-                tensors.append(transform(img))
-                valid_indices.append(i + j)
-            except Exception:
-                continue
-        if not tensors:
-            mmap[i: i + BATCH_SIZE] = 0.0
+    gpu_batch = 128 if DEVICE == "cuda" else BATCH_SIZE
+    num_workers = 4 if DEVICE == "cuda" else 0
+
+    dataset = ImagePathDataset(image_paths, transform)
+    loader = DataLoader(
+        dataset,
+        batch_size=gpu_batch,
+        num_workers=num_workers,
+        pin_memory=(DEVICE == "cuda"),
+        shuffle=False,
+    )
+
+    for batch_tensors, batch_indices, batch_ok in loader:
+        valid_mask = batch_ok.numpy().astype(bool)
+        if not valid_mask.any():
             continue
-        stacked = torch.stack(tensors).to(DEVICE)
-        feats = model(stacked).cpu().numpy().astype(np.float32)
-        for vi, f in zip(valid_indices, feats):
-            mmap[vi] = f
-        # failed rows stay as zeros
+
+        batch_tensors = batch_tensors.to(DEVICE)
+        if DEVICE == "cuda":
+            with torch.autocast(device_type="cuda"):
+                feats = model(batch_tensors)
+        else:
+            feats = model(batch_tensors)
+        feats = feats.cpu().numpy().astype(np.float32)
+
+        for j, ok in enumerate(valid_mask):
+            row = batch_indices[j].item()
+            if ok:
+                mmap[row] = feats[j]
+            else:
+                mmap[row] = 0.0
 
     mmap.flush()
     return mmap
+
+
+def _uniform_sample(image_paths: list[str], target_count: int) -> list[str]:
+    if len(image_paths) <= target_count:
+        return image_paths
+    step = len(image_paths) / target_count
+    return [image_paths[int(i * step)] for i in range(target_count)]
 
 
 def diversity_sample_by_kmeans(
@@ -117,15 +151,12 @@ def diversity_sample_by_kmeans(
         mmap = _extract_features_to_memmap(image_paths, mmap_path)
         n = len(image_paths)
 
-        # normalize rows for cosine-like distance
         norms = np.linalg.norm(mmap, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         for start in range(0, n, MEMORY_CHUNK):
             end = min(start + MEMORY_CHUNK, n)
             mmap[start:end] /= norms[start:end]
 
-        # MiniBatchKMeans: partial_fit in chunks, never holds full dataset in RAM.
-        # chunk size must be >= n_clusters for partial_fit to pass validation.
         fit_chunk = max(MEMORY_CHUNK, target_count)
         kmeans = MiniBatchKMeans(
             n_clusters=target_count,
@@ -169,10 +200,35 @@ def diversity_sample_by_kmeans(
             pass
 
 
+def find_label_files(
+    image_paths: list[str],
+    label_dirs: list[str],
+    extensions: tuple[str, ...] = (".txt", ".xml"),
+) -> dict[str, list[str]]:
+    """Match label files to images by filename stem."""
+    mapping: dict[str, list[str]] = {}
+    for img_path in image_paths:
+        stem = Path(img_path).stem
+        matched: list[str] = []
+        for label_dir in label_dirs:
+            label_dir_path = Path(label_dir)
+            if not label_dir_path.is_dir():
+                continue
+            for ext in extensions:
+                candidate = label_dir_path / f"{stem}{ext}"
+                if candidate.is_file():
+                    matched.append(str(candidate))
+        if matched:
+            mapping[img_path] = matched
+    return mapping
+
+
 def dedup_and_sample(
     image_dir: str,
     target_count: int = 50,
     phash_threshold: int = 8,
+    label_dirs: list[str] | None = None,
+    fast_mode: bool = False,
 ) -> list[dict]:
     image_dir = Path(image_dir)
     image_files = sorted(
@@ -184,7 +240,14 @@ def dedup_and_sample(
 
     after_dedup = phash_dedup(image_files, threshold=phash_threshold)
 
-    sampled = diversity_sample_by_kmeans(after_dedup, target_count)
+    if fast_mode:
+        sampled = _uniform_sample(after_dedup, target_count)
+    else:
+        sampled = diversity_sample_by_kmeans(after_dedup, target_count)
+
+    label_map = {}
+    if label_dirs:
+        label_map = find_label_files(sampled, label_dirs)
 
     return [
         {
@@ -193,6 +256,7 @@ def dedup_and_sample(
             "total_input": len(image_files),
             "after_dedup": len(after_dedup),
             "after_sample": len(sampled),
+            "labels": label_map.get(p, []),
         }
         for p in sampled
     ]

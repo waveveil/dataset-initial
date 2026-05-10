@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npm install *)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(ls -la \"D:\\\\Users\\\\Jay\\\\Downloads\\\\FASDD_UAV\")",
+      "Read(//d/Users/Jay/Downloads/FASDD_UAV/**)",
+      "Bash(find \"D:\\\\Users\\\\Jay\\\\Downloads\\\\FASDD_UAV\" -type d 2>/dev/null | head -50)",
+      "Bash(python -c ' *)"
     ]
   }
 }
