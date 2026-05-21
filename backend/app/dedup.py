@@ -227,7 +227,6 @@ def dedup_and_sample(
     image_dir: str,
     target_count: int = 50,
     phash_threshold: int = 8,
-    label_dirs: list[str] | None = None,
     fast_mode: bool = False,
 ) -> list[dict]:
     image_dir = Path(image_dir)
@@ -245,10 +244,6 @@ def dedup_and_sample(
     else:
         sampled = diversity_sample_by_kmeans(after_dedup, target_count)
 
-    label_map = {}
-    if label_dirs:
-        label_map = find_label_files(sampled, label_dirs)
-
     return [
         {
             "path": p,
@@ -256,7 +251,6 @@ def dedup_and_sample(
             "total_input": len(image_files),
             "after_dedup": len(after_dedup),
             "after_sample": len(sampled),
-            "labels": label_map.get(p, []),
         }
         for p in sampled
     ]

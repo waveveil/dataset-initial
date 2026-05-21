@@ -4,7 +4,6 @@ export default function DedupSample() {
   const [imageDir, setImageDir] = useState('')
   const [targetCount, setTargetCount] = useState(50)
   const [phashThreshold, setPhashThreshold] = useState(8)
-  const [labelDirs, setLabelDirs] = useState('')
   const [fastMode, setFastMode] = useState(false)
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -35,7 +34,6 @@ export default function DedupSample() {
       formData.append('target_count', targetCount)
       formData.append('phash_threshold', phashThreshold)
       formData.append('fast_mode', fastMode)
-      if (labelDirs) formData.append('label_dirs', labelDirs)
 
       const res = await fetch('/api/dedup/sample', { method: 'POST', body: formData })
       const data = await res.json()
@@ -55,8 +53,6 @@ export default function DedupSample() {
   const reduction = summary
     ? `${summary.total_input} → ${summary.after_dedup} → ${summary.after_sample}`
     : ''
-  const totalLabels = results?.results?.reduce((sum, r) => sum + (r.labels?.length || 0), 0) || 0
-
   const handleExport = async () => {
     if (!results?.results?.length) return
     setExportLoading(true)
@@ -68,15 +64,10 @@ export default function DedupSample() {
         body: JSON.stringify({
           file_paths: results.results.map((r) => r.path),
           output_dir: outputDir,
-          label_dirs: labelDirs ? labelDirs.split(',').map(d => d.trim()).filter(Boolean) : null,
         }),
       })
       const data = await res.json()
-      if (data.label_exported) {
-        setExportMsg(`已导出 ${data.exported} 张图片、${data.label_exported} 个标签文件至 ${data.output_dir}`)
-      } else {
-        setExportMsg(`已导出 ${data.exported} 个文件至 ${data.output_dir}`)
-      }
+      setExportMsg(`已导出 ${data.exported} 个文件至 ${data.output_dir}`)
     } catch {
       setExportMsg('导出失败，请确认后端服务已启动')
     } finally {
@@ -117,19 +108,6 @@ export default function DedupSample() {
                 className="w-full text-sm text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600"
               />
             </label>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1.5">
-              标签目录（可选，多个用逗号分隔）
-            </label>
-            <input
-              type="text"
-              value={labelDirs}
-              onChange={(e) => setLabelDirs(e.target.value)}
-              placeholder="如: D:/labels/YOLO/, D:/labels/VOC/"
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-            />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
@@ -190,9 +168,6 @@ export default function DedupSample() {
             {results && (
               <span className="ml-2 text-sm font-normal text-gray-400">
                 共 {results.total} 张
-                {totalLabels > 0 && (
-                  <span className="ml-1 text-green-400">+ {totalLabels} 标签</span>
-                )}
               </span>
             )}
           </h2>

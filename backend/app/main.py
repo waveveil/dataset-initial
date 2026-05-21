@@ -80,7 +80,6 @@ async def api_dedup_sample(
     image_dir: str = Form(None),
     target_count: int = Form(50),
     phash_threshold: int = Form(8),
-    label_dirs: str = Form(None),
     fast_mode: bool = Form(False),
 ):
     if image_dir:
@@ -98,15 +97,10 @@ async def api_dedup_sample(
     else:
         return {"error": "请提供图片目录路径或上传 ZIP 文件"}
 
-    parsed_label_dirs = None
-    if label_dirs:
-        parsed_label_dirs = [d.strip() for d in label_dirs.split(",") if d.strip()]
-
     results = dedup_and_sample(
         str(work_dir),
         target_count=target_count,
         phash_threshold=phash_threshold,
-        label_dirs=parsed_label_dirs,
         fast_mode=fast_mode,
     )
     return {
@@ -157,6 +151,108 @@ async def api_export(req: ExportRequest):
         "exported": len(copied),
         "label_exported": label_copied,
         "output_dir": str(output),
+    }
+
+
+@app.post("/api/labels/extract")
+async def api_labels_extract(
+    image_dir: str = Form(...),
+    label_dirs: str = Form(...),
+    output_dir: str = Form(None),
+):
+    img_dir = Path(image_dir)
+    if not img_dir.is_dir():
+        return {"error": "目标图片文件夹不存在"}
+
+    image_files = sorted([
+        str(f) for f in img_dir.iterdir()
+        if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    ])
+    if not image_files:
+        return {"error": "目标文件夹中没有图片文件"}
+
+    parsed_label_dirs = [d.strip() for d in label_dirs.split(",") if d.strip()]
+    if not parsed_label_dirs:
+        return {"error": "请提供标签文件夹路径"}
+
+    from .dedup import find_label_files
+    label_map = find_label_files(image_files, parsed_label_dirs)
+
+    if output_dir:
+        out_dir = Path(output_dir)
+    else:
+        out_dir = img_dir.parent / "label"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    details = []
+    for img_path, label_paths in label_map.items():
+        for lp in label_paths:
+            lp_path = Path(lp)
+            dst = out_dir / lp_path.name
+            shutil.copy2(lp_path, dst)
+            details.append({
+                "image": Path(img_path).name,
+                "label": lp_path.name,
+            })
+
+    return {
+        "total_images": len(image_files),
+        "matched_images": len(label_map),
+        "labels_copied": len(details),
+        "output_dir": str(out_dir),
+        "details": details,
+    }
+
+
+@app.post("/api/integrity/check")
+async def api_integrity_check(
+    image_dir: str = Form(...),
+    label_dir: str = Form(...),
+    label_extensions: str = Form("txt,xml,json"),
+):
+    img_dir = Path(image_dir)
+    lbl_dir = Path(label_dir)
+
+    if not img_dir.is_dir():
+        return {"error": "图片文件夹不存在"}
+    if not lbl_dir.is_dir():
+        return {"error": "标签文件夹不存在"}
+
+    img_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    lbl_exts = {f".{e.strip()}" for e in label_extensions.split(",") if e.strip()}
+
+    image_files = sorted([
+        f for f in img_dir.iterdir()
+        if f.suffix.lower() in img_exts
+    ])
+    label_files = sorted([
+        f for f in lbl_dir.iterdir()
+        if f.suffix.lower() in lbl_exts
+    ])
+
+    image_stems = {f.stem: f.name for f in image_files}
+    label_stems = {f.stem: f.name for f in label_files}
+
+    images_without_labels = sorted([
+        name for stem, name in image_stems.items()
+        if stem not in label_stems
+    ])
+    labels_without_images = sorted([
+        name for stem, name in label_stems.items()
+        if stem not in image_stems
+    ])
+    matched_pairs = sorted([
+        {"image": image_stems[stem], "label": label_stems[stem]}
+        for stem in image_stems.keys() & label_stems.keys()
+    ], key=lambda x: x["image"])
+
+    return {
+        "total_images": len(image_files),
+        "total_labels": len(label_files),
+        "matched": len(matched_pairs),
+        "images_without_labels": images_without_labels,
+        "labels_without_images": labels_without_images,
+        "matched_pairs": matched_pairs,
     }
 
 

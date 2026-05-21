@@ -1,6 +1,6 @@
 # 数据集初筛工具
 
-一个基于 CLIP + ResNet50 的图片数据集筛选 Web 应用，提供**场景语义筛选**、**去重多样性采样**和**批量重命名**三大功能，适用于计算机视觉任务的数据预处理。
+一个基于 CLIP + ResNet50 的图片数据集预处理 Web 应用，提供**场景语义筛选**、**去重多样性采样**、**标签提取**、**完整性检验**和**批量重命名**五大功能，适用于计算机视觉任务的数据预处理。
 
 ## 项目架构
 
@@ -8,10 +8,12 @@
 initial_datasets/
 ├── start.bat                   # 一键启动脚本
 ├── backend/                    # Python 后端 (FastAPI)
+│   ├── models/
+│   │   └── open_clip_model.safetensors  # CLIP 模型权重（本地离线）
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── config.py           # 配置：模型名、设备、批大小
-│   │   ├── main.py             # API 入口：7 个接口 + CORS + 静态文件
+│   │   ├── main.py             # API 入口：8 个接口 + CORS + 静态文件
 │   │   ├── scene_filter.py     # 场景筛选：CLIP 零样本图文匹配
 │   │   ├── dedup.py            # 去重采样：pHash → ResNet50 → MiniBatchKMeans
 │   │   └── rename.py           # 批量重命名：预览 → 确认执行
@@ -21,11 +23,13 @@ initial_datasets/
 ├── frontend/                   # React 前端 (Vite + Tailwind CSS)
 │   ├── src/
 │   │   ├── main.jsx
-│   │   ├── App.jsx             # 三标签页布局
+│   │   ├── App.jsx             # 五标签页布局
 │   │   └── components/
-│   │       ├── SceneFilter.jsx  # 场景筛选页
-│   │       ├── DedupSample.jsx  # 去重采样页
-│   │       └── FileRename.jsx   # 批量重命名页
+│   │       ├── SceneFilter.jsx   # 场景筛选页
+│   │       ├── DedupSample.jsx   # 去重采样页
+│   │       ├── LabelExtract.jsx  # 标签提取页
+│   │       ├── IntegrityCheck.jsx # 完整性检验页
+│   │       └── FileRename.jsx    # 批量重命名页
 │   ├── package.json
 │   └── vite.config.js          # Vite 配置 + /api 代理
 └── README.md
@@ -37,7 +41,7 @@ initial_datasets/
 
 ### 原理
 
-使用 **OpenAI CLIP (ViT-B-32)** 模型的零样本图文匹配能力，无需任何标注即可从大批量图片中筛选出符合场景描述的图片。
+使用 **OpenAI CLIP (ViT-B-32)** 模型的零样本图文匹配能力，无需任何标注即可从大批量图片中筛选出符合场景描述的图片。CLIP 模型权重已内置在项目中，支持离线运行。
 
 ```
 文本描述 "aerial view of forest fire from drone"
@@ -102,6 +106,7 @@ initial_datasets/
 - 特征直接写入 `np.memmap` 临时文件，内存恒定 ~10MB
 - 使用 `MiniBatchKMeans` 分块训练，每次只加载 2048 行特征
 - 将图片聚类为 N 个语义簇，每簇选离簇中心最近的图
+- 支持**快速模式**：仅执行 pHash 去重 + 均匀采样，跳过特征聚类
 
 ### 参数说明
 
@@ -110,6 +115,7 @@ initial_datasets/
 | 图片目录路径 | 本地图片文件夹路径 | - |
 | 目标采样数量 | 最终保留的图片数（聚类簇数） | 50 |
 | 汉明距离阈值 | 越小去重越严格，1~64 | 8 |
+| 快速模式 | 仅 pHash 去重，跳过特征聚类 | 关闭 |
 
 ### 内存安全
 
@@ -126,7 +132,65 @@ initial_datasets/
 
 ---
 
-## 功能三：批量重命名
+## 功能三：标签提取
+
+### 原理
+
+根据筛选后的图片集，从原始数据集标注文件夹中按文件名匹配并提取对应的标注文件。
+
+```
+筛选后的图片                    源标注文件夹
+  img_001.jpg        →         img_001.txt  ✓ 匹配
+  img_002.jpg        →         img_002.xml  ✓ 匹配
+  img_003.jpg        →         (无匹配)      ✗ 跳过
+```
+
+1. 扫描目标图片文件夹中的所有图片文件
+2. 在用户指定的标注文件夹中按文件名主干匹配标注文件（.txt / .xml）
+3. 将匹配到的标注文件复制到指定输出目录
+
+### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| 目标图片文件夹 | 筛选后的图片所在目录 | - |
+| 源标签文件夹 | 原始数据集的标注目录，多个用逗号分隔 | - |
+| 标签输出目录 | 匹配到的标注文件输出位置 | 目标文件夹同级的 label 目录 |
+
+---
+
+## 功能四：完整性检验
+
+### 原理
+
+检验数据集中每张图片是否都有对应的同名标注文件，同时检查是否存在孤立的标注文件（无对应图片）。
+
+```
+图片文件夹                    标注文件夹
+  img_001.jpg        ↔        img_001.txt  ✓ 匹配
+  img_002.jpg        ↔        img_002.txt  ✓ 匹配
+  img_003.jpg        ↔        (缺失)       ✗ 缺少标注
+  (无对应)           ↔        img_004.txt  ✗ 孤立标注
+```
+
+1. 扫描图片文件夹，提取所有图片文件名主干
+2. 扫描标注文件夹，提取所有标注文件名主干
+3. 交叉比对，找出：
+   - 缺少标注的图片
+   - 无对应图片的孤立标注文件
+   - 成功匹配的图片-标注对
+
+### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| 图片文件夹 | 待检验的图片目录 | - |
+| 标注文件夹 | 待检验的标注目录 | - |
+| 标注文件扩展名 | 逗号分隔，如 `txt,xml,json` | txt,xml,json |
+
+---
+
+## 功能五：批量重命名
 
 ### 原理
 
@@ -194,7 +258,7 @@ set HF_ENDPOINT=https://hf-mirror.com
 export HF_ENDPOINT=https://hf-mirror.com
 ```
 
-首次启动时会从 HuggingFace 下载 CLIP 模型（~400MB）和 ResNet50 权重（~100MB），设置镜像可大幅提速。
+首次启动时会从 HuggingFace 下载 ResNet50 权重（~100MB），设置镜像可大幅提速。CLIP 模型已内置在项目中，无需联网下载。
 
 ### 3. 启动服务
 
@@ -227,6 +291,8 @@ npx vite --host
 
 - **场景筛选**：填写图片目录路径 → 输入场景描述（英文） → 设置返回数量 → 开始筛选 → 预览结果 → 导出
 - **去重采样**：填写图片目录路径 → 设置目标采样数量 → 设置汉明距离阈值 → 开始去重采样 → 查看流水线统计 → 导出结果
+- **标签提取**：填写目标图片文件夹 → 填写源标签文件夹 → 设置输出目录 → 开始提取 → 查看匹配结果
+- **完整性检验**：填写图片文件夹 → 填写标注文件夹 → 设置标注扩展名 → 开始检验 → 查看缺失和孤立文件
 - **批量重命名**：填写目录路径 → 设置前缀和数字格式 → 预览重命名 → 确认执行
 
 ### 6. 前端构建部署
@@ -245,9 +311,11 @@ npx vite build
 |------|------|------|
 | POST | `/api/filter/scene` | 场景筛选（支持 `image_dir` 或 ZIP `file`） |
 | POST | `/api/dedup/sample` | 去重采样（支持 `image_dir` 或 ZIP `file`） |
+| POST | `/api/labels/extract` | 标签提取（按文件名匹配并复制标注文件） |
+| POST | `/api/integrity/check` | 完整性检验（检查图片与标注的对应关系） |
 | POST | `/api/rename/preview` | 重命名预览（返回改名映射表） |
 | POST | `/api/rename/execute` | 确认执行重命名 |
-| POST | `/api/export` | 导出结果文件（JSON body: `file_paths` + `output_dir`） |
+| POST | `/api/export` | 导出结果文件（JSON body） |
 | GET  | `/api/image-file?path=` | 通过绝对路径读取图片文件 |
 
 ---
