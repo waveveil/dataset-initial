@@ -79,7 +79,24 @@ npx vite build
 5. 填写导出目录点"导出结果"
 
 
-七、参数说明
+七、数据集统计使用流程
+------------------------------------------
+1. 准备标签文件夹，如 D:/dataset/labels/ (YOLO .txt 或 VOC .xml)
+2. 在"数据统计"页填写:
+   - 标签文件夹: D:/dataset/labels/
+   - 标签格式: YOLO (.txt) 或 Pascal VOC (.xml)
+   - 图片文件夹: 可选，填了仅额外显示图片-标签交叉比对信息
+3. 点"开始统计"
+4. 查看统计指标:
+   - 标签文件数、目标总数、类别数、每文件目标数分布
+   - 类别分布表 (每类数量与占比)
+   - 大中小目标数量与比例
+5. 查看可视化图表 (点击可放大):
+   - 标签分布图: 类别柱状图 + 每图目标直方图 + bbox宽高/位置散点图
+   - 相关性矩阵: x/y/width/height 两两关系
+
+
+八、参数说明
 ------------------------------------------
 场景筛选:
   - 返回数量 (Top-K): 返回匹配度最高的前K张，默认50
@@ -93,8 +110,14 @@ npx vite build
   - 目标采样数量: 最终保留的图片数量
   - 汉明距离阈值: 1~64，越小越相似（去重越严格），默认8
 
+数据统计:
+  - 标签文件夹: 存放 YOLO .txt 或 VOC .xml 的目录
+  - 标签格式: txt (YOLO 归一化坐标) / xml (VOC 像素坐标)
+  - 图片文件夹: 可选，仅用于交叉比对，不影响统计结果
+  - 尺寸分档 (相对面积): Small < 0.25% | Medium 0.25%~2.25% | Large > 2.25%
 
-八、调试命令
+
+九、调试命令
 ------------------------------------------
 # 检查 open_clip 版本和返回值
 python -c "import open_clip; result = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k'); print([type(r).__name__ for r in result])"
@@ -106,7 +129,7 @@ python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Devic
 python -c "from app.scene_filter import filter_by_scene; r = filter_by_scene('D:/test', 'forest fire', top_k=5); print(r)"
 
 
-九、常见问题
+十、常见问题
 ------------------------------------------
 Q: 启动报 "No module named 'xxx'"
 A: pip install xxx 或重新 pip install -r requirements.txt
