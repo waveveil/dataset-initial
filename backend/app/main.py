@@ -12,6 +12,7 @@ from .config import UPLOAD_DIR, OUTPUT_DIR
 from .scene_filter import filter_by_scene
 from .dedup import dedup_and_sample
 from .rename import preview_rename, execute_rename
+from .dataset_stats import compute_stats
 
 
 class ExportRequest(BaseModel):
@@ -254,6 +255,19 @@ async def api_integrity_check(
         "labels_without_images": labels_without_images,
         "matched_pairs": matched_pairs,
     }
+
+
+@app.post("/api/stats")
+async def api_dataset_stats(
+    label_dir: str = Form(...),
+    label_format: str = Form("txt"),
+    image_dir: str = Form(None),
+):
+    if not Path(label_dir).is_dir():
+        return {"error": "标签文件夹不存在"}
+
+    result = compute_stats(label_dir, label_format, image_dir or None)
+    return result
 
 
 @app.post("/api/rename/preview")

@@ -4,12 +4,14 @@ import DedupSample from './components/DedupSample'
 import FileRename from './components/FileRename'
 import LabelExtract from './components/LabelExtract'
 import IntegrityCheck from './components/IntegrityCheck'
+import DatasetStats from './components/DatasetStats'
 
 const TABS = [
   { id: 'filter', label: '场景筛选', component: SceneFilter },
   { id: 'dedup', label: '去重采样', component: DedupSample },
   { id: 'labels', label: '标签提取', component: LabelExtract },
   { id: 'integrity', label: '完整性检验', component: IntegrityCheck },
+  { id: 'stats', label: '数据统计', component: DatasetStats },
   { id: 'rename', label: '批量重命名', component: FileRename },
 ]
 
