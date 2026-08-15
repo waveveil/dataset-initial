@@ -5,12 +5,14 @@ import FileRename from './components/FileRename'
 import LabelExtract from './components/LabelExtract'
 import IntegrityCheck from './components/IntegrityCheck'
 import DatasetStats from './components/DatasetStats'
+import AnnotationPreview from './components/AnnotationPreview'
 
 const TABS = [
   { id: 'filter', label: '场景筛选', component: SceneFilter },
   { id: 'dedup', label: '去重采样', component: DedupSample },
   { id: 'labels', label: '标签提取', component: LabelExtract },
   { id: 'integrity', label: '完整性检验', component: IntegrityCheck },
+  { id: 'preview', label: '标注预览', component: AnnotationPreview },
   { id: 'stats', label: '数据统计', component: DatasetStats },
   { id: 'rename', label: '批量重命名', component: FileRename },
 ]
@@ -23,9 +25,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <header className="border-b border-gray-800 bg-gray-900">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-8">
-          <h1 className="text-lg font-semibold text-white">数据集初筛工具</h1>
-          <nav className="flex gap-1">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex flex-wrap items-center gap-x-8 gap-y-3">
+          <h1 className="text-lg font-semibold text-white whitespace-nowrap">数据集初筛工具</h1>
+          <nav className="flex flex-wrap gap-1">
             {TABS.map((tab) => (
               <button
                 key={tab.id}

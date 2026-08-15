@@ -1,6 +1,6 @@
 # 数据集初筛工具
 
-一个基于 CLIP + ResNet50 的图片数据集预处理 Web 应用，提供**场景语义筛选**、**去重多样性采样**、**标签提取**、**完整性检验**、**数据集统计**和**批量重命名**六大功能，适用于计算机视觉任务的数据预处理。
+一个基于 CLIP + ResNet50 的图片数据集预处理 Web 应用，提供**场景语义筛选**、**去重多样性采样**、**标签提取**、**完整性检验**、**YOLO 标注预览**、**数据集统计**和**批量重命名**七大功能，适用于计算机视觉任务的数据预处理。
 
 ## 项目架构
 
@@ -13,10 +13,11 @@ initial_datasets/
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── config.py           # 配置：模型名、设备、批大小
-│   │   ├── main.py             # API 入口：9 个接口 + CORS + 静态文件
+│   │   ├── main.py             # API 入口 + CORS + 静态文件
 │   │   ├── scene_filter.py     # 场景筛选：CLIP 零样本图文匹配
 │   │   ├── dedup.py            # 去重采样：pHash → ResNet50 → MiniBatchKMeans
 │   │   ├── dataset_stats.py    # 数据统计：标签解析 + 图表生成
+│   │   ├── annotation_preview.py # YOLO 标注解析、绘框与安全预览会话
 │   │   └── rename.py           # 批量重命名：预览 → 确认执行
 │   ├── requirements.txt
 │   ├── uploads/                # ZIP 上传解压目录
@@ -24,12 +25,13 @@ initial_datasets/
 ├── frontend/                   # React 前端 (Vite + Tailwind CSS)
 │   ├── src/
 │   │   ├── main.jsx
-│   │   ├── App.jsx             # 六标签页布局
+│   │   ├── App.jsx             # 七标签页布局
 │   │   └── components/
 │   │       ├── SceneFilter.jsx   # 场景筛选页
 │   │       ├── DedupSample.jsx   # 去重采样页
 │   │       ├── LabelExtract.jsx  # 标签提取页
 │   │       ├── IntegrityCheck.jsx # 完整性检验页
+│   │       ├── AnnotationPreview.jsx # YOLO 标注预览页
 │   │       ├── DatasetStats.jsx   # 数据统计页
 │   │       └── FileRename.jsx    # 批量重命名页
 │   ├── package.json
@@ -192,7 +194,43 @@ initial_datasets/
 
 ---
 
-## 功能五：数据集统计
+## 功能五：YOLO 标注预览
+
+### 原理
+
+输入服务端可访问的图片文件夹和标签文件夹后，系统只扫描两个目录的当前层级，并按文件名主干匹配图片与同名 `.txt` 标签。选择图片时，后端读取 YOLO 格式的归一化坐标，将 bbox 与类别文字直接绘制到图片上后返回页面。
+
+YOLO 标签每行格式：
+
+```text
+class_id center_x center_y width height
+```
+
+坐标均为相对于图片宽高的 `0~1` 归一化值。没有同名标签文件的图片仍会显示原图，并提示“未找到同名标签”。
+
+### 类别名称映射
+
+类别映射为可选项，每行使用 `ID:类别名称`：
+
+```text
+0:火焰
+1:烟雾
+2:灭火器
+```
+
+未填写映射时显示数字类别 `0`、`1`、`2`；只填写部分映射时，未映射的类别仍回退显示数字 ID。页面支持从列表选择图片，以及使用“上一张 / 下一张”连续检查标注。
+
+### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| 图片文件夹 | 当前目录中待预览的 jpg/jpeg/png/bmp/webp 图片 | - |
+| YOLO 标签文件夹 | 与图片同名的 `.txt` 标注所在目录 | - |
+| 类别名称映射 | 每行 `ID:类别名称`，可使用中文 | 留空，显示数字 ID |
+
+---
+
+## 功能六：数据集统计
 
 ### 原理
 
@@ -237,7 +275,7 @@ initial_datasets/
 
 ---
 
-## 功能六：批量重命名
+## 功能七：批量重命名
 
 ### 原理
 
@@ -340,6 +378,7 @@ npx vite --host
 - **去重采样**：填写图片目录路径 → 设置目标采样数量 → 设置汉明距离阈值 → 开始去重采样 → 查看流水线统计 → 导出结果
 - **标签提取**：填写目标图片文件夹 → 填写源标签文件夹 → 设置输出目录 → 开始提取 → 查看匹配结果
 - **完整性检验**：填写图片文件夹 → 填写标注文件夹 → 设置标注扩展名 → 开始检验 → 查看缺失和孤立文件
+- **标注预览**：填写图片与 YOLO 标签文件夹 → 可选填写 `ID:类别名称` → 加载图片 → 从列表或上一张/下一张查看绘框结果
 - **数据集统计**：填写标签文件夹 → 选择标签格式 → 开始统计 → 查看统计指标与可视化图表（可选填图片文件夹进行交叉比对）
 - **批量重命名**：填写目录路径 → 设置前缀和数字格式 → 预览重命名 → 确认执行
 
@@ -361,6 +400,8 @@ npx vite build
 | POST | `/api/dedup/sample` | 去重采样（支持 `image_dir` 或 ZIP `file`） |
 | POST | `/api/labels/extract` | 标签提取（按文件名匹配并复制标注文件） |
 | POST | `/api/integrity/check` | 完整性检验（检查图片与标注的对应关系） |
+| POST | `/api/annotations/preview/load` | 加载图片与 YOLO 标签目录，建立安全预览会话 |
+| POST | `/api/annotations/preview/render` | 按会话中的图片 ID 绘制 bbox 和类别文字，返回 PNG |
 | POST | `/api/stats` | 数据集统计（解析标签，返回统计指标与 base64 图表） |
 | POST | `/api/rename/preview` | 重命名预览（返回改名映射表） |
 | POST | `/api/rename/execute` | 确认执行重命名 |

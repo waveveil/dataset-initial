@@ -2,10 +2,10 @@ import uuid
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from .config import UPLOAD_DIR, OUTPUT_DIR
@@ -13,12 +13,32 @@ from .scene_filter import filter_by_scene
 from .dedup import dedup_and_sample
 from .rename import preview_rename, execute_rename
 from .dataset_stats import compute_stats
+from .annotation_preview import (
+    PreviewImageNotFound,
+    PreviewRenderError,
+    PreviewSessionNotFound,
+    PreviewValidationError,
+    create_preview_session,
+    render_preview,
+)
 
 
 class ExportRequest(BaseModel):
     file_paths: list[str]
     output_dir: str
     label_dirs: list[str] | None = None
+
+
+class AnnotationPreviewLoadRequest(BaseModel):
+    image_dir: str
+    label_dir: str
+
+
+class AnnotationPreviewRenderRequest(BaseModel):
+    session_id: str
+    image_id: str
+    class_mapping: str = ""
+
 
 app = FastAPI(title="数据集初筛工具")
 
@@ -37,9 +57,50 @@ app.mount("/api/images", StaticFiles(directory=str(UPLOAD_DIR)), name="images")
 async def serve_image_file(path: str = Query(...)):
     file_path = Path(path)
     if not file_path.is_file():
-        from fastapi.responses import Response
         return Response(status_code=404)
     return FileResponse(file_path)
+
+
+@app.post("/api/annotations/preview/load")
+async def api_annotation_preview_load(req: AnnotationPreviewLoadRequest):
+    try:
+        return create_preview_session(req.image_dir, req.label_dir)
+    except PreviewValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="无法读取所选文件夹") from exc
+
+
+@app.post("/api/annotations/preview/render")
+async def api_annotation_preview_render(req: AnnotationPreviewRenderRequest):
+    try:
+        rendered = render_preview(
+            req.session_id,
+            req.image_id,
+            req.class_mapping,
+        )
+    except PreviewValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PreviewSessionNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PreviewImageNotFound as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PreviewRenderError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return Response(
+        content=rendered.content,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Label-Found": str(rendered.label_found).lower(),
+            "X-Box-Count": str(rendered.box_count),
+            "X-Skipped-Box-Count": str(rendered.skipped_count),
+            "Access-Control-Expose-Headers": (
+                "X-Label-Found, X-Box-Count, X-Skipped-Box-Count"
+            ),
+        },
+    )
 
 
 @app.post("/api/filter/scene")

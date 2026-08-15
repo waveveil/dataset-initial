@@ -50,9 +50,6 @@ export default function DedupSample() {
   }
 
   const summary = results?.results?.[0]
-  const reduction = summary
-    ? `${summary.total_input} → ${summary.after_dedup} → ${summary.after_sample}`
-    : ''
   const handleExport = async () => {
     if (!results?.results?.length) return
     setExportLoading(true)

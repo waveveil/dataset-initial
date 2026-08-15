@@ -182,7 +182,7 @@ export default function FileRename() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {preview.results.map((r, i) => (
+                    {preview.results.map((r) => (
                       <tr key={r.old_path} className="text-gray-300 hover:bg-gray-800/50">
                         <td className="px-3 py-2 truncate max-w-[180px]">{r.old_name}</td>
                         <td className="px-2 py-2 text-center text-gray-600">→</td>
